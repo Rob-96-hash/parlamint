@@ -54,7 +54,7 @@ def main() -> None:
     truncation_report(model, texts)
     vectors = embed_passages(model, texts)
 
-    assert vectors.shape == (len(chunks), model.get_sentence_embedding_dimension())
+    assert vectors.shape == (len(chunks), model.get_embedding_dimension())
     assert np.allclose(np.linalg.norm(vectors, axis=1), 1.0, atol=1e-3), "vectors not normalised"
 
     # One self-contained file: chunk text + metadata + vector (payload for Qdrant)

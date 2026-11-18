@@ -1,5 +1,6 @@
 """Central settings: paths, data source and cleaning thresholds."""
 
+import os
 from pathlib import Path
 
 # Project root = two levels above this file (src/parlamint_rag/config.py)
@@ -30,3 +31,7 @@ CHUNKS_PARQUET = PROCESSED_DIR / "chunks.parquet"
 # Embeddings
 EMBED_MODEL = "intfloat/multilingual-e5-small"  # 384 dimensions
 EMBEDDINGS_PARQUET = PROCESSED_DIR / "embeddings.parquet"
+
+# Vector database (environment variable lets docker-compose point to the qdrant service)
+QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
+COLLECTION = "parlamint_chunks"
