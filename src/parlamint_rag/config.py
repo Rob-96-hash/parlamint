@@ -21,3 +21,12 @@ MIN_WORDS = 50
 
 SPEECHES_PARQUET = PROCESSED_DIR / "speeches.parquet"
 DUCKDB_PATH = PROCESSED_DIR / "parlamint.duckdb"
+
+# Chunking (in words). 250 words are roughly 350 to 400 e5 tokens, below the 512 limit.
+CHUNK_SIZE = 250
+CHUNK_OVERLAP = 50
+CHUNKS_PARQUET = PROCESSED_DIR / "chunks.parquet"
+
+# Embeddings
+EMBED_MODEL = "intfloat/multilingual-e5-small"  # 384 dimensions
+EMBEDDINGS_PARQUET = PROCESSED_DIR / "embeddings.parquet"

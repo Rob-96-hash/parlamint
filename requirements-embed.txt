@@ -1,0 +1,2 @@
+# Embedding step (Colab GPU). torch is preinstalled on Colab, so it is not listed here.
+sentence-transformers==6.3.0
