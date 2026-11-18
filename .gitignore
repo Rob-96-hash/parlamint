@@ -1,0 +1,47 @@
+# Secrets (never commit)
+.env
+.env.*
+!.env.example
+*.key
+*token*
+secrets/
+
+# Data (ParlaMint is downloaded by the ETL script, ~330 MB)
+data/
+*.tgz
+*.tar.gz
+*.parquet
+*.duckdb
+*.duckdb.wal
+*.sqlite
+*.db
+*.npy
+
+# Vector DB storage
+qdrant_storage/
+.qdrant/
+
+# Model files / caches
+models/
+*.safetensors
+*.bin
+*.gguf
+*.pt
+.cache/
+hf_cache/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
