@@ -1,0 +1,23 @@
+"""Central settings: paths, data source and cleaning thresholds."""
+
+from pathlib import Path
+
+# Project root = two levels above this file (src/parlamint_rag/config.py)
+ROOT = Path(__file__).resolve().parents[2]
+
+DATA_DIR = ROOT / "data"
+RAW_DIR = DATA_DIR / "raw"
+PROCESSED_DIR = DATA_DIR / "processed"
+
+# ParlaMint-AT 4.x, CLARIN.SI handle 11356/1912, licence CC BY 4.0
+PARLAMINT_URL = (
+    "https://www.clarin.si/repository/xmlui/bitstream/handle/11356/1912/"
+    "ParlaMint-AT.tgz?sequence=1&isAllowed=y"
+)
+TGZ_PATH = RAW_DIR / "ParlaMint-AT.tgz"
+
+YEARS = range(2018, 2023)  # 2018 to 2022 inclusive
+MIN_WORDS = 50
+
+SPEECHES_PARQUET = PROCESSED_DIR / "speeches.parquet"
+DUCKDB_PATH = PROCESSED_DIR / "parlamint.duckdb"
