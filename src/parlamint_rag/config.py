@@ -35,3 +35,8 @@ EMBEDDINGS_PARQUET = PROCESSED_DIR / "embeddings.parquet"
 # Vector database (environment variable lets docker-compose point to the qdrant service)
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
 COLLECTION = "parlamint_chunks"
+
+# Generation: local LLM via Ollama, no external API
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+LLM_MODEL = os.environ.get("LLM_MODEL", "qwen3:1.7b")
+TOP_K = 5
