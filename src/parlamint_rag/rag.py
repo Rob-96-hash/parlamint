@@ -82,7 +82,14 @@ class RAG:
         )
         answer = response.message.content.strip()
         sources = [{"n": n, "score": round(h.score, 3), **h.payload} for n, h in enumerate(hits, start=1)]
-        return {"question": question, "answer": answer, "sources": sources, "cited": cited_numbers(answer)}
+        # Ollama reports durations in nanoseconds
+        stats = {
+            "prompt_tokens": response.prompt_eval_count,
+            "answer_tokens": response.eval_count,
+            "seconds": round(response.total_duration / 1e9, 1),
+        }
+        return {"question": question, "answer": answer, "sources": sources,
+                "cited": cited_numbers(answer), "stats": stats}
 
 
 def main() -> None:
@@ -105,7 +112,10 @@ def main() -> None:
         print(f"WARNING: answer cites sources that do not exist: {invalid}")
     if not result["cited"] and result["answer"] != NO_ANSWER:
         print("WARNING: answer has no citations")
-    print(f"(model: {config.LLM_MODEL})")
+    stats = result.get("stats")
+    if stats:
+        print(f"(model: {config.LLM_MODEL}, {stats['prompt_tokens']} prompt tokens, "
+              f"{stats['answer_tokens']} answer tokens, {stats['seconds']} s)")
 
 
 if __name__ == "__main__":
