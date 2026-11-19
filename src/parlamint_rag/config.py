@@ -40,3 +40,8 @@ COLLECTION = "parlamint_chunks"
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 LLM_MODEL = os.environ.get("LLM_MODEL", "qwen3:1.7b")
 TOP_K = 5
+
+# Evaluation
+EVAL_DIR = ROOT / "eval"
+QUESTIONS_PATH = EVAL_DIR / "questions.jsonl"
+RESULTS_DIR = EVAL_DIR / "results"
