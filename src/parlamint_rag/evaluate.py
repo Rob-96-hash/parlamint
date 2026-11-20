@@ -3,6 +3,7 @@
 Run with:
     python -m parlamint_rag.evaluate --retrieval-only     # fast: Qdrant + query embeddings only
     python -m parlamint_rag.evaluate                      # also generates all answers (slow on CPU)
+    python -m parlamint_rag.evaluate --resume             # continue an interrupted run
     python -m parlamint_rag.evaluate --summarize eval/results/answers_qwen3-1.7b.csv
                                                           # after rating the answers by hand
 
@@ -19,8 +20,10 @@ Answer metrics:
 
 import argparse
 import json
+import time
 from pathlib import Path
 
+import ollama
 import pandas as pd
 
 from parlamint_rag import config
@@ -75,34 +78,59 @@ def is_abstention(answer: str) -> bool:
     return ABSTENTION_MARKER in answer
 
 
-def evaluate_answers(rag, questions: list[dict]) -> pd.DataFrame:
-    rows = []
+def answer_with_retry(rag, q: dict, attempts: int = 3, wait: int = 15) -> dict:
+    """The Ollama runner occasionally crashes on the small CPU machine ("unexpected EOF").
+    Ollama restarts it on the next request, so waiting and asking again usually works."""
+    for attempt in range(1, attempts + 1):
+        try:
+            return rag.answer(q["question"], party=q["party"], year=q["year"])
+        except ollama.ResponseError as error:
+            if attempt == attempts:
+                raise
+            print(f"[evaluate] {q['id']} failed ({error}), retry {attempt}/{attempts - 1} in {wait} s", flush=True)
+            time.sleep(wait)
+
+
+def answer_row(q: dict, result: dict) -> dict:
+    sources, cited = result["sources"], result["cited"]
+    gold = set(q["gold_speech_ids"])
+    cited_speech_ids = {s["speech_id"] for s in sources if s["n"] in cited}
+    return {
+        "id": q["id"],
+        "type": q["type"],
+        "question": q["question"],
+        "reference_answer": q["reference_answer"],
+        "answer": result["answer"],
+        "abstained": is_abstention(result["answer"]),
+        "n_citations": len(cited),
+        "citations_valid": all(1 <= n <= len(sources) for n in cited),
+        "gold_retrieved": any(s["speech_id"] in gold for s in sources),
+        "cites_gold": bool(cited_speech_ids & gold),
+        "sources": " | ".join(f"[{s['n']}] {s['speaker']}, {s['date']}, {s['speech_id']}" for s in sources),
+        "seconds": result.get("stats", {}).get("seconds"),
+        # filled in by hand: 1 = yes, 0 = no
+        "faithful": "",   # every statement is supported by the cited source
+        "correct": "",    # the answer matches the reference answer
+        "notes": "",
+    }
+
+
+def evaluate_answers(rag, questions: list[dict], path: Path, resume: bool = False) -> pd.DataFrame:
+    """Answer all questions. Saves after every answer, so a crash loses nothing;
+    with resume=True, questions already in `path` are skipped."""
+    done = read_answers_csv(path) if resume and path.exists() else pd.DataFrame()
+    rows = done.to_dict("records")
+    done_ids = set(done["id"]) if len(done) else set()
+    if done_ids:
+        print(f"[evaluate] resuming, {len(done_ids)} answers already in {path.name}", flush=True)
     for i, q in enumerate(questions, start=1):
-        result = rag.answer(q["question"], party=q["party"], year=q["year"])
-        sources, cited = result["sources"], result["cited"]
-        gold = set(q["gold_speech_ids"])
-        cited_speech_ids = {s["speech_id"] for s in sources if s["n"] in cited}
-        seconds = result.get("stats", {}).get("seconds")
-        rows.append({
-            "id": q["id"],
-            "type": q["type"],
-            "question": q["question"],
-            "reference_answer": q["reference_answer"],
-            "answer": result["answer"],
-            "abstained": is_abstention(result["answer"]),
-            "n_citations": len(cited),
-            "citations_valid": all(1 <= n <= len(sources) for n in cited),
-            "gold_retrieved": any(s["speech_id"] in gold for s in sources),
-            "cites_gold": bool(cited_speech_ids & gold),
-            "sources": " | ".join(f"[{s['n']}] {s['speaker']}, {s['date']}, {s['speech_id']}" for s in sources),
-            "seconds": seconds,
-            # filled in by hand: 1 = yes, 0 = no
-            "faithful": "",   # every statement is supported by the cited source
-            "correct": "",    # the answer matches the reference answer
-            "notes": "",
-        })
-        print(f"[evaluate] {i}/{len(questions)} {q['id']} ({q['type']}) {seconds} s")
-    return pd.DataFrame(rows)
+        if q["id"] in done_ids:
+            continue
+        rows.append(answer_row(q, answer_with_retry(rag, q)))
+        pd.DataFrame(rows).to_csv(path, **CSV_OPTIONS)
+        print(f"[evaluate] {i}/{len(questions)} {q['id']} ({q['type']}) {rows[-1]['seconds']} s", flush=True)
+    order = {q["id"]: i for i, q in enumerate(questions)}
+    return pd.DataFrame(rows).sort_values("id", key=lambda s: s.map(order), ignore_index=True)
 
 
 def answer_summary(df: pd.DataFrame) -> pd.Series:
@@ -143,6 +171,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate retrieval and answers.")
     parser.add_argument("--retrieval-only", action="store_true", help="skip answer generation")
     parser.add_argument("--summarize", type=Path, help="summarise an existing (rated) answers CSV")
+    parser.add_argument("--resume", action="store_true",
+                        help="keep answers already in the answers CSV and only generate the missing ones")
     args = parser.parse_args()
 
     if args.summarize:
@@ -168,8 +198,8 @@ def main() -> None:
         return
 
     model = config.LLM_MODEL.replace(":", "-")
-    answers = evaluate_answers(rag, questions)
     path = config.RESULTS_DIR / f"answers_{model}.csv"
+    answers = evaluate_answers(rag, questions, path, resume=args.resume)
     answers.to_csv(path, **CSV_OPTIONS)
     print(f"\nAnswers ({config.LLM_MODEL})\n" + answer_summary(answers).to_string())
     print(f"\nRate the answers by hand in {path} (columns faithful, correct: 1 or 0), then run:\n"
