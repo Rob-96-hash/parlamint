@@ -1,0 +1,21 @@
+﻿id;type;question;rank;top1_speech_id;Recall@1;Recall@5;Recall@10;MRR
+q01;fact;Wie viele Anträge der Opposition aus der letzten Sitzung des Kulturausschusses wurden im April 2019 vertagt?;2.0;ParlaMint-AT_2022-04-27-027-XXVII-NRSITZ-00153_d7e25874;False;True;True;0.5
+q02;fact;Wie viele Haushalte mit nur einem Elternteil gab es in Österreich laut Statistik Austria im Jahr 2017?;;ParlaMint-AT_2021-04-22-027-XXVII-NRSITZ-00099_d7e13296;False;False;False;0.0
+q03;fact;Um wie viel Geld wird die Unterstützung für Studierende mit Studienbeihilfe ab 2023 aufgestockt?;1.0;ParlaMint-AT_2022-07-08-027-XXVII-NRSITZ-00169_d8e18117;True;True;True;1.0
+q04;fact;Wie viel Geld verliert die Unfallversicherung AUVA jährlich durch die Senkung ihres Beitragssatzes Anfang 2019?;1.0;ParlaMint-AT_2020-05-26-027-XXVII-NRSITZ-00032_d8e59972;True;True;True;1.0
+q05;fact;Wie hoch ist die jährliche öffentliche Förderung für einen Ausbildungsplatz in der überbetrieblichen Lehre?;1.0;ParlaMint-AT_2020-07-08-027-XXVII-NRSITZ-00045_d8e15919;True;True;True;1.0
+q06;fact;In welchem Anteil der Femizide hatte die Polizei gegen den späteren Täter schon vorher ein Betretungsverbot ausgesprochen?;;ParlaMint-AT_2018-10-25-026-XXVI-NRSITZ-00045_d8e10748;False;False;False;0.0
+q07;fact;Mit welchem Betrag will die EU Länder wie die Ukraine im Rahmen ihrer Nachbarschaftspolitik im Osten unterstützen?;5.0;ParlaMint-AT_2019-07-03-026-XXVI-NRSITZ-00086_d8e18527;False;True;True;0.2
+q08;fact;Welchen Anteil der Kosten bekommen Patientinnen und Patienten nach einem Besuch bei einer Ärztin ohne Kassenvertrag erstattet?;1.0;ParlaMint-AT_2019-03-27-026-XXVI-NRSITZ-00066_d7e16680;True;True;True;1.0
+q09;fact;Wie viel Geld setzt die Bundesregierung 2022 gegen Langzeitarbeitslosigkeit ein?;10.0;ParlaMint-AT_2021-11-16-027-XXVII-NRSITZ-00129_d8e49401;False;False;True;0.1
+q10;fact;Wie stark ging die Zahl neu diagnostizierter Brustkrebsfälle während des Corona-Lockdowns zurück?;1.0;ParlaMint-AT_2020-11-20-027-XXVII-NRSITZ-00064_d8e12856;True;True;True;1.0
+q11;fact;Welcher Anteil der 11- bis 18-Jährigen wurde laut einer Umfrage einer Kinderhilfsorganisation schon einmal online sexuell belästigt?;1.0;ParlaMint-AT_2018-06-14-026-XXVI-NRSITZ-00031_d8e5310;True;True;True;1.0
+q12;fact;Mit wie viel Geld pro Jahr beteiligt sich der Bund am Ausbau der Wiener U-Bahn?;1.0;ParlaMint-AT_2020-05-26-027-XXVII-NRSITZ-00032_d8e30662;True;True;True;1.0
+q13;filter;Welche jährlichen Einbußen bei den Direktzahlungen an Bauern befürchtet die FPÖ durch die EU-Agrarpläne?;3.0;ParlaMint-AT_2019-05-16-026-XXVI-NRSITZ-00076_d8e11247;False;True;True;0.3333333333333333
+q14;filter;Wie stark sind die Importe Russlands laut den Grünen wegen der Sanktionen eingebrochen?;3.0;ParlaMint-AT_2022-10-03-027-XXVII-NRSITZ-00174_d8e6981;False;True;True;0.3333333333333333
+q15;filter;Bei welchem Betrag müsste die steuerfreie Einkommensgrenze laut NEOS liegen, wenn sie seit 2009 an die Inflation angepasst worden wäre?;1.0;ParlaMint-AT_2022-04-27-027-XXVII-NRSITZ-00153_d7e20438;True;True;True;1.0
+q16;filter;Wie stark wurden die Mittel des Frauenministeriums laut ÖVP seit Beginn der Legislaturperiode erhöht?;;ParlaMint-AT_2021-01-14-027-XXVII-NRSITZ-00077_d7e2889;False;False;False;0.0
+q17;filter;Wie viel Geld hat der Bund laut SPÖ in den vergangenen Jahren über die Länder für Kinderbetreuung an die Gemeinden weitergegeben?;1.0;ParlaMint-AT_2018-04-17-026-XXVI-NRSITZ-00019_d7e10128;True;True;True;1.0
+q18;speaker;Wie viele Tonnen CO2 soll der Verkehr nach den Plänen von Ministerin Köstinger bis 2030 einsparen?;5.0;ParlaMint-AT_2018-10-18-026-XXVI-NRSITZ-00041_d7e6913;False;True;True;0.2
+q19;speaker;Vor welchen finanziellen Folgen einer schwachen Klimapolitik warnte Pamela Rendi-Wagner?;;ParlaMint-AT_2020-05-26-027-XXVII-NRSITZ-00032_d8e8867;False;False;False;0.0
+q20;speaker;Welches Integrationsprojekt im Sport sah Martha Bißmann als gestoppt an, und was kostete es?;1.0;ParlaMint-AT_2018-04-20-026-XXVI-NRSITZ-00021_d8e15300;True;True;True;1.0
