@@ -4,6 +4,7 @@ Run with:
     python -m parlamint_rag.evaluate --retrieval-only     # fast: Qdrant + query embeddings only
     python -m parlamint_rag.evaluate                      # also generates all answers (slow on CPU)
     python -m parlamint_rag.evaluate --resume             # continue an interrupted run
+    python -m parlamint_rag.evaluate --tag fix            # write answers_<model>_fix.csv instead
     python -m parlamint_rag.evaluate --summarize eval/results/answers_qwen3-1.7b.csv
                                                           # after rating the answers by hand
 
@@ -75,7 +76,13 @@ def retrieval_summary(df: pd.DataFrame) -> pd.DataFrame:
 # --- Answers ----------------------------------------------------------------
 
 def is_abstention(answer: str) -> bool:
+    """Lenient: the answer contains the no-answer sentence (possibly after other text)."""
     return ABSTENTION_MARKER in answer
+
+
+def is_clean_abstention(answer: str) -> bool:
+    """Strict: the answer is only the no-answer sentence, as the prompt asks."""
+    return answer.strip().strip("\"„“'") == config.NO_ANSWER
 
 
 def answer_with_retry(rag, q: dict, attempts: int = 3, wait: int = 15) -> dict:
@@ -134,6 +141,11 @@ def evaluate_answers(rag, questions: list[dict], path: Path, resume: bool = Fals
 
 
 def answer_summary(df: pd.DataFrame) -> pd.Series:
+    df = df.copy()
+    df["answer"] = df["answer"].fillna("").astype(str)
+    # Recomputed from the answer text, so older CSVs are summarised with the same definitions
+    df["abstained"] = df["answer"].map(is_abstention)
+    df["clean"] = df["answer"].map(is_clean_abstention)
     answerable = df[df["type"] != "unanswerable"]
     unanswerable = df[df["type"] == "unanswerable"]
     summary = {
@@ -142,15 +154,18 @@ def answer_summary(df: pd.DataFrame) -> pd.Series:
         "answerable: answer cites a gold speech": answerable["cites_gold"].mean(),
         "answerable: has at least one citation": (answerable["n_citations"] > 0).mean(),
         "all: citations valid": df["citations_valid"].mean(),
-        "unanswerable: correct abstention": unanswerable["abstained"].mean(),
+        "all: mixed (text plus no-answer sentence)": (df["abstained"] & ~df["clean"]).mean(),
+        "unanswerable: abstained (contains no-answer sentence)": unanswerable["abstained"].mean(),
+        "unanswerable: clean abstention (only that sentence)": unanswerable["clean"].mean(),
         "mean seconds per answer": pd.to_numeric(df["seconds"]).mean(),
     }
-    # Manual ratings, only where filled in (answered, answerable questions)
-    rated = answerable[~answerable["abstained"]]
-    for col in ("faithful", "correct"):
-        values = pd.to_numeric(rated[col], errors="coerce").dropna()
-        if len(values):
-            summary[f"manual: {col} (n={len(values)})"] = values.mean()
+    # Manual ratings, only where filled in
+    groups = {"answered answerable": answerable[~answerable["abstained"]], "unanswerable": unanswerable}
+    for name, group in groups.items():
+        for col in ("faithful", "correct"):
+            values = pd.to_numeric(group[col], errors="coerce").dropna()
+            if len(values):
+                summary[f"manual {name}: {col} (n={len(values)})"] = values.mean()
     return pd.Series(summary).round(2)
 
 
@@ -173,6 +188,7 @@ def main() -> None:
     parser.add_argument("--summarize", type=Path, help="summarise an existing (rated) answers CSV")
     parser.add_argument("--resume", action="store_true",
                         help="keep answers already in the answers CSV and only generate the missing ones")
+    parser.add_argument("--tag", help="suffix for the answers CSV, e.g. 'fix' -> answers_<model>_fix.csv")
     args = parser.parse_args()
 
     if args.summarize:
@@ -198,7 +214,7 @@ def main() -> None:
         return
 
     model = config.LLM_MODEL.replace(":", "-")
-    path = config.RESULTS_DIR / f"answers_{model}.csv"
+    path = config.RESULTS_DIR / f"answers_{model}{'_' + args.tag if args.tag else ''}.csv"
     answers = evaluate_answers(rag, questions, path, resume=args.resume)
     answers.to_csv(path, **CSV_OPTIONS)
     print(f"\nAnswers ({config.LLM_MODEL})\n" + answer_summary(answers).to_string())

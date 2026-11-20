@@ -40,6 +40,8 @@ COLLECTION = "parlamint_chunks"
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 LLM_MODEL = os.environ.get("LLM_MODEL", "qwen3:1.7b")
 TOP_K = 5
+# Fixed sentence for "the sources do not answer this"; also used to measure abstention
+NO_ANSWER = "Dazu finde ich in den Quellen keine Antwort."
 
 # Evaluation
 EVAL_DIR = ROOT / "eval"
