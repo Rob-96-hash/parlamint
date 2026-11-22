@@ -52,6 +52,11 @@ def format_sources(hits: list) -> str:
     return "\n\n".join(blocks)
 
 
+def to_sources(hits: list) -> list[dict]:
+    """Qdrant hits -> plain dicts with the source number n, score and payload (speaker, text, ...)."""
+    return [{"n": n, "score": round(h.score, 3), **h.payload} for n, h in enumerate(hits, start=1)]
+
+
 def cited_numbers(answer: str) -> list[int]:
     """Source numbers the model cited, e.g. "... [1] ... [3]" -> [1, 3]."""
     return sorted({int(n) for n in re.findall(r"\[(\d+)\]", answer)})
@@ -84,6 +89,11 @@ class RAG:
                party: str | None = None, year: int | None = None) -> dict:
         """Retrieve k chunks and generate a cited German answer; also returns sources and stats."""
         hits = self.retrieve(question, k=k, party=party, year=year)
+        return self.generate(question, hits)
+
+    def generate(self, question: str, hits: list) -> dict:
+        """Let the LLM answer from the given chunks (separate from retrieve, so the app can
+        show the sources while the model is still writing)."""
         if not hits:
             return {"question": question, "answer": NO_ANSWER, "sources": [], "cited": []}
 
@@ -100,7 +110,7 @@ class RAG:
             options={"temperature": 0.1, "num_ctx": 4096},
         )
         answer = response.message.content.strip()
-        sources = [{"n": n, "score": round(h.score, 3), **h.payload} for n, h in enumerate(hits, start=1)]
+        sources = to_sources(hits)
         # Ollama reports durations in nanoseconds
         stats = {
             "prompt_tokens": response.prompt_eval_count,

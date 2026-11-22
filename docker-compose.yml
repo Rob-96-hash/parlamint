@@ -1,0 +1,53 @@
+# Whole system on one machine: vector database, local LLM and the app. No external API.
+#   docker compose up -d --build        then open http://localhost:8501
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.20.2
+    environment:
+      # Do not send usage statistics to the vendor
+      QDRANT__TELEMETRY_DISABLED: "true"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    # Bound to localhost only: reachable for index.py / evaluate.py on this machine, not from outside
+    ports:
+      - "127.0.0.1:6333:6333"
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:0.40.16
+    volumes:
+      - ollama_models:/root/.ollama
+    ports:
+      - "127.0.0.1:11434:11434"
+    restart: unless-stopped
+
+  app:
+    build: .
+    environment:
+      # Service names are host names inside the compose network
+      QDRANT_URL: http://qdrant:6333
+      OLLAMA_URL: http://ollama:11434
+      LLM_MODEL: ${LLM_MODEL:-qwen3:1.7b}
+      # "-" instead of ":-": RERANK_MODEL="" stays empty and switches the reranker off
+      RERANK_MODEL: ${RERANK_MODEL-cross-encoder/mmarco-mMiniLMv2-L12-H384-v1}
+      HF_HUB_DISABLE_TELEMETRY: "1"
+    volumes:
+      # Hugging Face models are downloaded once and kept between restarts
+      - hf_cache:/home/appuser/.cache/huggingface
+      # Read-only data folder, only needed to (re)build the index from inside the container
+      - ./data:/app/data:ro
+    ports:
+      - "8501:8501"
+    depends_on:
+      - qdrant
+      - ollama
+    restart: unless-stopped
+
+volumes:
+  # Fixed names, so the volumes created earlier with "docker run -v ..." are reused
+  qdrant_storage:
+    name: qdrant_storage
+  ollama_models:
+    name: ollama_models
+  hf_cache:
+    name: hf_cache

@@ -1,0 +1,12 @@
+# Keep the build context small and free of data, secrets and local files.
+# The Dockerfile copies only what the app needs; this mainly avoids sending ~500 MB of data.
+.git
+.venv
+data
+eval
+notebooks
+docs
+*.md
+**/__pycache__
+.env
+.env.*
