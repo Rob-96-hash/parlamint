@@ -1,4 +1,5 @@
-"""Cheap check of a generated answer: is every number in a source that the sentence cites?
+"""Cheap checks of a generated answer: does every sentence cite a source, and is every
+number in a source that its sentence cites?
 
 Small models often state the main fact correctly but add details that are not in the
 sources (a wrong year, an extra percentage) or cite the wrong source number. Checking
@@ -22,6 +23,18 @@ CITATION_RE = re.compile(r"\[(\d+)\]")
 SENTENCE_END_RE = re.compile(r"(?<=[.!?])\s+(?!\[)")
 
 
+def split_sentences(answer: str) -> list[str]:
+    """Split an answer into sentences; a citation after the full stop stays with its sentence."""
+    return [s for s in SENTENCE_END_RE.split(answer.strip()) if s]
+
+
+def uncited_sentences(answer: str, no_answer: str = "") -> list[str]:
+    """Sentences without a source number, although the prompt asks for one in every sentence.
+    The fixed no-answer sentence is not a claim and is skipped."""
+    return [s for s in split_sentences(answer)
+            if not CITATION_RE.search(s) and not (no_answer and no_answer in s)]
+
+
 def numbers(text: str) -> set[str]:
     """All numbers in a text, normalised ("16 000" and "16.000" both become "16000")."""
     # Citation markers like [2] are not claims
@@ -41,7 +54,7 @@ def unsupported_numbers(answer: str, sources: dict[int, str], question: str = ""
     source_numbers = {n: numbers(text) for n, text in sources.items()}
     from_question = numbers(question)
     problems = []
-    for sentence in SENTENCE_END_RE.split(answer.strip()):
+    for sentence in split_sentences(answer):
         cited = {int(n) for n in CITATION_RE.findall(sentence)} & source_numbers.keys()
         # A sentence without a valid citation is checked against all sources
         allowed = set().union(*(source_numbers[n] for n in (cited or source_numbers)))

@@ -9,6 +9,9 @@ Run with:
     python -m parlamint_rag.evaluate --summarize eval/results/answers_qwen3-1.7b.csv
                                                           # after rating the answers by hand
     RERANK_MODEL="" python -m parlamint_rag.evaluate ...  # vector search only, without reranker
+    python -m parlamint_rag.evaluate --gate eval/results/answers_qwen3-1.7b_rerank.csv
+                                                          # best reranker score per question and
+                                                          # simulated relevance gate (~4 min)
 
 Retrieval metrics (answerable questions only, relevance on speech level):
     Recall@k  share of questions with at least one gold speech among the top k chunks
@@ -181,6 +184,46 @@ def answer_summary(df: pd.DataFrame) -> pd.Series:
     return pd.Series(summary).round(2)
 
 
+# --- Relevance gate ---------------------------------------------------------
+
+def top_scores(rag, questions: list[dict]) -> pd.DataFrame:
+    """Best reranker score for every question, answerable and unanswerable (retrieval only)."""
+    rows = []
+    for q in questions:
+        hits = rag.retrieve(q["question"], party=q["party"], year=q["year"])
+        rows.append({"id": q["id"], "type": q["type"],
+                     "top_score": round(max(h.score for h in hits), 3) if hits else None})
+    return pd.DataFrame(rows)
+
+
+def gate_table(scores: pd.DataFrame, answers: pd.DataFrame) -> pd.DataFrame:
+    """Simulate the relevance gate on rated answers for every useful threshold.
+
+    Above the threshold the answer stays as it was (the LLM sees the same sources);
+    below it the system returns the no-answer sentence: correct for unanswerable
+    questions, not correct for answerable ones. So no new LLM run is needed.
+    """
+    df = scores.merge(answers[["id", "correct"]], on="id")
+    df["correct"] = pd.to_numeric(df["correct"])
+    df["answerable"] = df["type"] != "unanswerable"
+    # Candidate thresholds: midway between neighbouring scores, plus "off"
+    s = sorted(df["top_score"].unique())
+    thresholds = [None] + [round((a + b) / 2, 2) for a, b in zip(s, s[1:])]
+    rows = []
+    for t in thresholds:
+        blocked = df["top_score"] < t if t is not None else pd.Series(False, index=df.index)
+        correct = df["correct"].where(~blocked, (~df["answerable"]).astype(int))
+        rows.append({
+            "threshold": "off" if t is None else t,
+            "answerable blocked": int((blocked & df["answerable"]).sum()),
+            "unanswerable blocked": int((blocked & ~df["answerable"]).sum()),
+            "answerable correct": correct[df["answerable"]].mean(),
+            "unanswerable correct": correct[~df["answerable"]].mean(),
+            "all correct": correct.mean(),
+        })
+    return pd.DataFrame(rows).round(2)
+
+
 def read_answers_csv(path: Path) -> pd.DataFrame:
     """Read the (hand-rated) answers CSV. Falls back to cp1252 if Excel saved it as ANSI."""
     try:
@@ -202,6 +245,9 @@ def main() -> None:
     parser.add_argument("--resume", action="store_true",
                         help="keep answers already in the answers CSV and only generate the missing ones")
     parser.add_argument("--tag", help="suffix for all result files, e.g. 'rerank' -> retrieval_rerank.csv")
+    parser.add_argument("--gate", type=Path,
+                        help="rated answers CSV (made with the reranker): measure the best reranker "
+                             "score per question and simulate the relevance gate")
     args = parser.parse_args()
 
     if args.summarize:
@@ -215,6 +261,18 @@ def main() -> None:
     suffix = f"_{args.tag}" if args.tag else ""
     questions = load_questions()
     rag = RAG()
+
+    if args.gate:
+        if rag.reranker is None:
+            raise SystemExit("--gate needs the reranker (RERANK_MODEL must not be empty)")
+        scores = top_scores(rag, questions)
+        scores.to_csv(config.RESULTS_DIR / f"top_scores{suffix}.csv", **CSV_OPTIONS)
+        print("\nBest reranker score per question\n"
+              + scores.sort_values("top_score").to_string(index=False))
+        table = gate_table(scores, read_answers_csv(args.gate))
+        table.to_csv(config.RESULTS_DIR / f"gate{suffix}.csv", **CSV_OPTIONS)
+        print("\nRelevance gate, simulated on the rated answers\n" + table.to_string(index=False))
+        return
 
     retrieval = evaluate_retrieval(rag, questions)
     retrieval.to_csv(config.RESULTS_DIR / f"retrieval{suffix}.csv", **CSV_OPTIONS)

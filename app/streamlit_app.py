@@ -8,7 +8,7 @@ import streamlit as st
 
 from parlamint_rag import config
 from parlamint_rag.rag import NO_ANSWER, RAG, to_sources
-from parlamint_rag.verify import unsupported_numbers
+from parlamint_rag.verify import uncited_sentences, unsupported_numbers
 
 PARTIES = ["ÖVP", "SPÖ", "FPÖ", "Grüne", "NEOS", "JETZT"]
 EXAMPLES = [
@@ -40,11 +40,20 @@ def show_sources(sources: list[dict], cited: list[int]) -> None:
 def show_checks(result: dict, question: str) -> None:
     """Automatic checks of the answer, shown as warnings (they flag, they do not correct)."""
     answer, sources = result["answer"], result["sources"]
+    if result.get("gated"):
+        st.info(f"Kein Redeabschnitt ist relevant genug (bester Score {sources[0]['score']:.2f} "
+                f"unter der Schwelle {config.RELEVANCE_THRESHOLD}). Das Sprachmodell wurde nicht gefragt.")
+        return
     invalid = [n for n in result["cited"] if n > len(sources)]
     if invalid:
         st.warning(f"Die Antwort zitiert Quellen, die es nicht gibt: {invalid}")
     if not result["cited"] and answer != NO_ANSWER:
         st.warning("Die Antwort enthält keine Quellenangaben.")
+    else:
+        # Single sentences without a source number (the prompt asks for one per sentence)
+        uncited = uncited_sentences(answer, NO_ANSWER)
+        if uncited:
+            st.warning("Ohne Quellenangabe, bitte prüfen:\n" + "\n".join(f"- „{s}“" for s in uncited))
     # Text plus the no-answer sentence: the model is unsure (20 % of answers in the evaluation)
     if NO_ANSWER in answer and answer != NO_ANSWER:
         st.info("Die Antwort enthält Text und zugleich den Hinweis, dass die Quellen die Frage "
@@ -67,6 +76,7 @@ with st.sidebar:
     st.divider()
     st.caption(f"Sprachmodell: {config.LLM_MODEL} (lokal über Ollama)  \n"
                f"Reranker: {config.RERANK_MODEL or 'aus'}  \n"
+               f"Relevanzschwelle: {config.RELEVANCE_THRESHOLD if config.RELEVANCE_THRESHOLD is not None else 'aus'}  \n"
                f"Embeddings: {config.EMBED_MODEL}")
 
 st.title("🏛️ Was wurde im Nationalrat gesagt?")

@@ -85,6 +85,13 @@ class RAG:
         # Stage 2: the slower, more accurate cross-encoder re-sorts only these candidates
         return rerank(self.reranker, question, candidates, k)
 
+    def below_threshold(self, hits: list) -> bool:
+        """Relevance gate: True if even the best hit scores below RELEVANCE_THRESHOLD.
+        Only active with the reranker, whose cross-encoder scores the threshold refers to."""
+        if self.reranker is None or config.RELEVANCE_THRESHOLD is None or not hits:
+            return False
+        return max(h.score for h in hits) < config.RELEVANCE_THRESHOLD
+
     def answer(self, question: str, k: int = config.TOP_K,
                party: str | None = None, year: int | None = None) -> dict:
         """Retrieve k chunks and generate a cited German answer; also returns sources and stats."""
@@ -96,6 +103,10 @@ class RAG:
         show the sources while the model is still writing)."""
         if not hits:
             return {"question": question, "answer": NO_ANSWER, "sources": [], "cited": []}
+        if self.below_threshold(hits):
+            # Nothing relevant enough: answer without the LLM instead of letting it guess
+            return {"question": question, "answer": NO_ANSWER, "sources": to_sources(hits),
+                    "cited": [], "gated": True}
 
         response = self.llm.chat(
             model=config.LLM_MODEL,
@@ -142,9 +153,12 @@ def main() -> None:
         print(f"WARNING: answer cites sources that do not exist: {invalid}")
     if not result["cited"] and result["answer"] != NO_ANSWER:
         print("WARNING: answer has no citations")
+    if result.get("gated"):
+        print(f"(relevance gate: best score below {config.RELEVANCE_THRESHOLD}, LLM not asked)")
     stats = result.get("stats")
     if stats:
         print(f"(model: {config.LLM_MODEL}, reranker: {config.RERANK_MODEL or 'off'}, "
+              f"relevance threshold: {config.RELEVANCE_THRESHOLD}, "
               f"{stats['prompt_tokens']} prompt tokens, "
               f"{stats['answer_tokens']} answer tokens, {stats['seconds']} s)")
 

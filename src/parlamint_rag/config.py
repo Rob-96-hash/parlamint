@@ -45,6 +45,11 @@ TOP_K = 5
 # (see rerank.py). RERANK_MODEL="" switches it off, e.g. for before/after comparisons.
 RERANK_MODEL = os.environ.get("RERANK_MODEL", "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1")
 RERANK_CANDIDATES = 30
+# Relevance gate: if even the best reranked chunk scores below this cross-encoder score,
+# the system answers NO_ANSWER without asking the LLM. Only used with the reranker
+# (vector search scores are on another scale). RELEVANCE_THRESHOLD="" switches it off.
+_threshold = os.environ.get("RELEVANCE_THRESHOLD", "")
+RELEVANCE_THRESHOLD = float(_threshold) if _threshold else None
 # Fixed sentence for "the sources do not answer this"; also used to measure abstention
 NO_ANSWER = "Dazu finde ich in den Quellen keine Antwort."
 
