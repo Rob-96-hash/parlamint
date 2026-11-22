@@ -74,6 +74,12 @@ python -m parlamint_rag.evaluate --summarize eval/results/answers_qwen3-1.7b_rer
 docker compose run --rm -v "$PWD/eval:/app/eval" app python -m parlamint_rag.evaluate --gate eval/results/answers_qwen3-1.7b_rerank.csv --tag rerank
 ```
 
+The figures in the README are made from these result files, without any model:
+
+```bash
+python -m parlamint_rag.plots     # writes docs/recall_at_k.png and docs/gate_scores.png
+```
+
 The questions are in [eval/questions.jsonl](eval/questions.jsonl), and all result files are in
 [eval/results/](eval/results/):
 
@@ -96,6 +102,7 @@ src/parlamint_rag/
   rag.py        retrieve -> relevance gate -> prompt -> cited answer
   verify.py     citation and number checks
   evaluate.py   Recall@k, MRR, answer metrics, relevance gate simulation
+  plots.py      README figures from the result files
 app/streamlit_app.py                   user interface
 eval/questions.jsonl, eval/results/    evaluation set and all result files
 notebooks/colab_runner.ipynb           GPU runner for the embeddings

@@ -2,9 +2,6 @@
 
 Robert Seidel · November 2026 · Setup and usage: [SETUP.md](SETUP.md)
 
-![The app: a cited answer with a warning about sentences that have no source](docs/app.png)
-*Figure 1: The app answers a question with numbered citations. It warns about sentences that cite no source and shows the speech passages it used.*
-
 ## 1 Introduction
 
 Retrieval-augmented generation (RAG) is nowadays a standard way to let a language model answer
@@ -35,6 +32,12 @@ evaluation set of 25 questions, it gives a correct answer to 80 % of the answera
 gain came from a second retrieval stage, not from prompt engineering. The main remaining
 weakness is faithfulness: the small model often gets the main fact right but adds a wrong
 detail.
+
+<p align="center">
+  <img src="docs/app.png" width="380" alt="The app: a cited answer with a warning about sentences that have no source">
+</p>
+
+*Figure 1: The app answers a question with numbered citations. It warns about sentences that cite no source and shows the speech passages it used.*
 
 ## 2 Data
 
@@ -207,6 +210,15 @@ politician said about a topic. Speaker names are stored as metadata, not in the 
 the retriever can only match the topic. It then returns passages on that topic by other
 speakers.
 
+![Recall@k for k = 1 to 10, with and without the reranker](docs/recall_at_k.png)
+
+*Figure 3: Recall@k for every k from 1 to 10. Values are shares of the 20 answerable questions.*
+
+Figure 3 shows where the gain comes from. With the reranker, the curve reaches its maximum of
+0.90 already at k = 3, while vector search alone climbs slowly and reaches only 0.80 at k = 10.
+The reranker does not find many new speeches. Instead, it moves the relevant ones to the top.
+This matters because the language model only sees the first five chunks.
+
 ### 5.2 Answers
 
 | | Baseline | Stricter prompt | Reranker | Reranker + gate |
@@ -274,9 +286,17 @@ blocks the hard cases also blocks correct answers. In addition, the threshold wa
 same 25 questions it is evaluated on, and the margin is small: the next correctly answered
 question scores 0.25. The result is therefore optimistic.
 
+![Best reranker score per question, with the threshold at 0.0](docs/gate_scores.png)
+
+*Figure 4: Best cross-encoder score per question. Filled markers are correct answers, hollow markers are wrong ones. Left of the line, the system returns the no-answer sentence.*
+
+Figure 4 makes both points visible. Left of the threshold lie only questions whose answer was
+wrong or that the model had correctly declined anyway. Right of it, the hard unanswerable
+questions mix with correctly answered ones, so no single threshold separates them.
+
 ![The relevance gate blocks a question that the speeches cannot answer](docs/gate.png)
 
-*Figure 3: The gate in the app. No passage is relevant enough, so the language model is not asked.*
+*Figure 5: The gate in the app. No passage is relevant enough, so the language model is not asked.*
 
 ### 5.4 Automatic checks
 
