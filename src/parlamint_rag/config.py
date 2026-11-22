@@ -48,7 +48,10 @@ RERANK_CANDIDATES = 30
 # Relevance gate: if even the best reranked chunk scores below this cross-encoder score,
 # the system answers NO_ANSWER without asking the LLM. Only used with the reranker
 # (vector search scores are on another scale). RELEVANCE_THRESHOLD="" switches it off.
-_threshold = os.environ.get("RELEVANCE_THRESHOLD", "")
+# 0.0 was chosen on the evaluation set (eval/results/gate_rerank.csv): it blocks two
+# unanswerable questions and one answerable question whose answer was wrong anyway,
+# and no correct answer. Higher values start to block correct answers.
+_threshold = os.environ.get("RELEVANCE_THRESHOLD", "0.0")
 RELEVANCE_THRESHOLD = float(_threshold) if _threshold else None
 # Fixed sentence for "the sources do not answer this"; also used to measure abstention
 NO_ANSWER = "Dazu finde ich in den Quellen keine Antwort."
