@@ -9,7 +9,7 @@ Robert Seidel · November 2026 · Setup and usage: [SETUP.md](SETUP.md)
 
 Retrieval-augmented generation (RAG) is nowadays a standard way to let a language model answer
 questions from a document collection it was not trained on (Lewis et al., 2020). This makes it
-an asset for companies and public administrations with large amounts of internal information:
+an asset for organisations with large amounts of internal information:
 employees can find what they need by asking a question instead of searching through documents.
 If the system runs on the organisation's own infrastructure, the documents never leave it. The
 system itself works as follows. A retriever first finds passages that are relevant to the
@@ -25,8 +25,8 @@ fine-tuned a Qwen model with LoRA to predict a speaker's party from speeches in 
 National Council (Nationalrat). Here I use the same corpus for a different task. My aim was to
 build a RAG system end to end, from the raw data to a containerised application, and to
 measure where it fails. Two constraints shaped the design. First, everything runs locally,
-with no external API, because sovereignty over data and models matters, especially in the
-public sector. Second, the language model is deliberately small (`qwen3:1.7b`), so that it runs
+with no external API, because sovereignty over data and models matters as soon as the
+documents are confidential. Second, the language model is deliberately small (`qwen3:1.7b`), so that it runs
 on two CPU cores. This makes the typical failure modes of RAG easy to observe, and it explains
 part of the weaknesses that the evaluation reveals.
 
