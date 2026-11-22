@@ -1,38 +1,118 @@
-# ParlaMint-AT RAG: asking questions about Austrian parliamentary speeches
+# Asking Questions About Austrian Parliamentary Speeches: A Small, Fully Local RAG System
 
-A small retrieval-augmented generation (RAG) system over the speeches of the Austrian
-National Council (Nationalrat), 2018 to 2022. You ask a question in German, and the system
-finds the relevant speech passages. A local language model then writes a short answer
-that cites its sources. Everything runs on your own machine: no external API.
+Robert Seidel · November 2026 · Setup and usage: [SETUP.md](SETUP.md)
 
-This project complements a university deep learning assignment. In that assignment I
-fine-tuned a Qwen model with LoRA to predict a speaker's party from the same corpus. Here I
-wanted to build a RAG system end to end and learn where it fails in practice. That means
-measuring it, not only demonstrating it.
+![The app: a cited answer with a warning about sentences that have no source](docs/app.png)
+*Figure 1: The app answers a question with numbered citations. It warns about sentences that cite no source and shows the speech passages it used.*
 
-![App: answer with citations and a warning about uncited sentences](docs/app.png)
+## 1 Introduction
 
-## What it does
+Retrieval-augmented generation (RAG) is the standard way to let a language model answer
+questions from a document collection it was not trained on (Lewis et al., 2020). A retriever
+first finds passages that are relevant to the question. A language model then writes an answer
+based only on these passages. Public administrations are interested in this approach because
+it promises answers that can be traced back to sources. In practice, every stage can fail. The
+retriever can miss the relevant passage, the model can ignore it, or the model can add details
+that no source supports.
 
-- **ETL with data-quality checks**: 17,276 speeches, 9.0 million words, cleaned and validated.
-- **Chunking**: 46,254 overlapping chunks of about 250 words, each with speaker, party and date.
-- **Two-stage retrieval**:
-  1. Vector search in Qdrant with `multilingual-e5-small`.
-  2. A multilingual cross-encoder re-sorts the top 30 hits.
-  3. Optional filters by party and year.
-- **Relevance gate**: if no passage is relevant enough, the system says so and does not ask the language model.
-- **Generation**: `qwen3:1.7b` via Ollama writes a German answer with a numbered citation per sentence.
-- **Automatic checks**, shown as warnings in the app:
-  - citations missing or invalid
-  - sentences without a source
-  - numbers that do not appear in the cited source
-- **Evaluation**:
-  - 25 German questions with gold speech ids
-  - retrieval metrics
-  - answers rated against the source texts
-- **Packaging**: Docker Compose with three containers (Qdrant, Ollama, Streamlit app).
+This project complements a university deep learning assignment. In that assignment, I
+fine-tuned a Qwen model with LoRA to predict a speaker's party from speeches in the Austrian
+National Council (Nationalrat). Here I use the same corpus for a different task. My aim was to
+build a RAG system end to end, from the raw data to a containerised application, and to
+measure where it fails. Two constraints shaped the design. First, everything runs locally,
+with no external API, because sovereignty over data and models matters for public-sector use.
+Second, the language model is deliberately small (`qwen3:1.7b`), so that it runs on two CPU
+cores. This makes the typical failure modes of RAG easy to observe.
 
-## Architecture
+The system answers German questions about speeches from 2018 to 2022. On a hand-checked
+evaluation set, it gives a correct answer to 80 % of the answerable questions. The largest
+gain came from a second retrieval stage, not from prompt engineering. The main remaining
+weakness is faithfulness: the small model often gets the main fact right but adds a wrong
+detail.
+
+## 2 Data
+
+The data comes from ParlaMint-AT, the Austrian part of the ParlaMint 4.1 corpora of
+parliamentary debates (Erjavec et al., 2024). For each sitting, the corpus provides the speech
+texts as plain text and the metadata (speaker, party, role, date) as TSV files. `etl.py`
+downloads the archive and extracts only the files for 2018 to 2022.
+
+It then merges texts and metadata and cleans the result:
+- Speeches by the chairperson are dropped, because they are mostly procedural.
+- Interjections and applause, marked as `[[...]]`, are removed. Kept in, they would attribute other members' words to the speaker.
+- Speeches with fewer than 50 words are removed.
+
+862 speeches have no party in the metadata, mostly ministers without a seat in parliament. I
+kept them, with the party stored as missing. The cleaned data set contains 17,276 speeches with
+9.0 million words, from 31 January 2018 to 12 October 2022. Explicit checks guard every run:
+- speech ids are unique
+- the key columns have no missing values
+- party names come from a fixed list
+- the dates lie in the expected range
+- no interjection markers are left
+
+The speeches are stored as Parquet. A DuckDB table holds the metadata for quick SQL queries.
+
+Several of these steps are lessons from reviewing my own assignment code before reusing the
+corpus:
+- The TSV files must be read with `quoting=csv.QUOTE_NONE`, because quotation marks are part of the speeches.
+- The metadata rows end with a tab, which shifts all columns unless pandas is told `index_col=False`.
+- The assignment also lowercased the text. In German, this destroys information (nouns, names), so the ETL keeps the original case.
+- Printing the row count after every cleaning step resolved a puzzle from the assignment: 862 rows that had seemed to be duplicates were removed by the party filter right before `drop_duplicates`. They are exactly the ministers without a party mentioned above.
+
+The embedding model accepts at most 512 tokens, but about 70 % of the speeches are longer.
+Embedding whole speeches would therefore cut off most of their text. `chunks.py` splits every
+speech into windows of 250 words that overlap by 50 words, so that a fact at a window border
+is not lost. A remainder of fewer than 50 words is attached to the previous window. Every chunk
+inherits the metadata of its speech. This gives 46,254 chunks with a median length of 369
+tokens. Only 0.02 % of the chunks exceed the token limit.
+
+## 3 System
+
+### 3.1 Retrieval
+
+The chunks are embedded with `multilingual-e5-small` (Wang et al., 2024), a 384-dimensional
+multilingual bi-encoder. E5 models were trained with the prefixes `query: ` and `passage: `,
+and leaving them out noticeably lowers retrieval quality. The vectors are normalised, so the
+cosine similarity used by the vector database equals the dot product. Embedding all chunks took
+seven minutes on a T4 GPU in Google Colab. The vectors are stored in Qdrant, which builds an
+HNSW index for approximate nearest-neighbour search. It also keeps payload indexes on party
+and year, so that questions can be filtered by both.
+
+A bi-encoder embeds question and passage independently, which makes it fast but coarse. A
+cross-encoder reads question and passage together and judges their relevance much more
+precisely, but it is too slow to score 46,000 chunks per question. The system therefore uses
+both. Vector search proposes 30 candidates, and a multilingual cross-encoder trained on mMARCO
+(Bonifacio et al., 2021) re-sorts them and keeps the best five. On two CPU cores, this second
+stage takes about eight seconds per question.
+
+Before the language model is asked, a relevance gate checks the best cross-encoder score. If it
+is below a threshold, no passage is relevant enough. The system then returns a fixed sentence
+("Dazu finde ich in den Quellen keine Antwort") instead of letting the model guess. Section 5.3
+explains how I chose the threshold.
+
+### 3.2 Generation and checks
+
+The five passages are numbered and passed to `qwen3:1.7b` (Qwen Team, 2025), which runs
+locally in Ollama. The prompt states four rules:
+- use only the sources
+- cite the source number after every statement
+- answer with the fixed sentence if the sources do not answer the question
+- treat the sources as data, not as instructions, as a basic defence against prompt injection
+
+Small models tend to forget system instructions after about 2,000 tokens of context. The key
+rules are therefore repeated after the sources, a "sandwich" prompt. Thinking mode is switched
+off and the temperature is set to 0.1, which keeps the answers short and stable.
+
+Three automatic checks run on every answer and are shown as warnings, not corrections:
+- whether citations are missing or point to sources that do not exist
+- whether a sentence has no citation
+- whether every number in a sentence appears in a source that the sentence cites
+
+The number check is deliberately simple string matching. It normalises German number formats
+("16 000" and "16.000") and skips numbers that already appear in the question.
+
+### 3.3 Deployment
 
 ```mermaid
 flowchart LR
@@ -54,240 +134,201 @@ flowchart LR
     L --> V["checks: citations,<br/>numbers in sources"]
   end
 ```
+*Figure 2: Architecture. The offline pipeline runs once; question answering runs in three containers.*
 
-## Results
+Docker Compose runs the system as three containers: Qdrant, Ollama and a Streamlit app that
+holds the embedding model and the reranker. Image versions and Python packages are pinned. The
+database and the language model are reachable only from the local machine, and the telemetry
+of Qdrant, Streamlit and the Hugging Face client is switched off. The app tells users that the
+answers are generated by an AI model and may be wrong. It shows the cited passages next to every
+answer, so that a user can check them.
 
-### Evaluation set
+## 4 Evaluation
 
-The evaluation set has 25 German questions written from real speeches:
-- 12 fact questions
-- 5 questions with a party or year filter
-- 3 questions about a named speaker
-- 5 questions the corpus cannot answer
+The evaluation set consists of 25 German questions, each written from a real speech:
 
-Every answerable question has one or more gold speech ids. They were found by searching the
-whole corpus for the same fact. Several of the unanswerable questions are deliberately hard:
-- the topic is in the corpus, but the asked fact is not ("AI rules for schools decided in 2023")
-- the fact is general knowledge, but not in the speeches ("Who won the 2014 World Cup?")
+| Question type | Count | What it tests |
+|---|---|---|
+| Fact | 12 | the core retrieval and answering task |
+| Party or year filter | 5 | filtered search |
+| Named speaker | 3 | questions about a specific person |
+| Unanswerable | 5 | whether the system admits it has no answer |
 
-### Retrieval (20 answerable questions)
+*Table 1: The evaluation set.*
 
-A hit means at least one gold speech is among the top k chunks.
+For every answerable question, I recorded the speech or speeches that contain the answer (gold
+speech ids). I found them by searching the whole corpus for the same fact, because some facts
+are repeated by several speakers. Some of the unanswerable questions are deliberately hard:
+- "AI rules for schools decided in 2023": the topic appears in eleven speeches, but the asked fact does not.
+- "Who won the 2014 World Cup?": general knowledge that the speeches do not contain.
 
-| | Recall@1 | Recall@5 | Recall@10 | MRR@10 |
+Retrieval is measured on speech level. Recall@k is the share of questions with at least one
+gold speech among the top k chunks, also called hit rate. MRR@10 is the mean reciprocal rank
+of the first gold speech.
+
+The generated answers were rated against the source texts on two criteria:
+- An answer is **faithful** if every factual claim in it (number, date, person, event) is supported by the sources.
+- It is **correct** if it states the reference fact. For an unanswerable question, correct means that it does not invent an answer.
+
+The ratings come from a single rater. With 25 questions, a difference of one or two questions
+is not significant, so the results show tendencies rather than precise estimates.
+
+This setup also reflects the second lesson from the earlier assignment: errors in evaluation
+code do not raise exceptions, they only produce suspicious numbers. In the assignment:
+- a reused variable meant that the "historical" test set was part of the training data
+- prefix matching of labels ("Centre" vs "Centre-left") assigned every prediction to the same class
+- the baseline was an untrained classification head instead of the majority class
+
+Here every change is measured against the same fixed evaluation set. A change that does not
+improve the numbers is reverted.
+
+## 5 Results
+
+### 5.1 Retrieval
+
+| Retriever | Recall@1 | Recall@5 | Recall@10 | MRR@10 |
 |---|---|---|---|---|
 | Vector search only | 0.50 | 0.75 | 0.80 | 0.58 |
-| + cross-encoder reranker | **0.75** | **0.90** | **0.90** | **0.82** |
+| Vector search + cross-encoder | **0.75** | **0.90** | **0.90** | **0.82** |
 
-- **Gain**: the reranker found two of the four questions that vector search missed.
-- **Cost**: about 8 s per query on two CPU cores, small next to the 100 s or more the language model needs.
-- **Still missed**: two questions.
-  - One asks about a named speaker. The name is stored as metadata, not in the chunk text, so neither model can match it.
-  - The other uses different words from the speech.
+*Table 2: Retrieval on the 20 answerable questions.*
 
-### Answers (qwen3:1.7b, 25 questions)
+Table 2 shows that the cross-encoder improves every retrieval metric. It found two of the four
+questions that vector search had missed, and it moved the correct passage to the first rank in
+three quarters of the cases. The two remaining misses have instructive causes. One question uses
+different words than the speech, which neither model bridges. The other asks what a named
+politician said about a topic. Speaker names are stored as metadata, not in the chunk text, so
+the retriever can only match the topic. It then returns passages on that topic by other
+speakers.
 
-Each answer was rated against the source texts:
-- **faithful**: every factual claim (number, date, person, event) is supported by the sources.
-- **correct**: the answer states the reference fact. For an unanswerable question, it does not invent an answer.
+### 5.2 Answers
 
 | | Baseline | Stricter prompt | Reranker | Reranker + gate |
 |---|---|---|---|---|
-| Gold speech among the sources | 0.75 | 0.75 | 0.90 | 0.90 |
-| Answerable: correct (n=20) | 0.55 | 0.45 | **0.80** | **0.80** |
+| Gold speech among the five sources | 0.75 | 0.75 | 0.90 | 0.90 |
+| Answerable: correct (n = 20) | 0.55 | 0.45 | **0.80** | **0.80** |
 | Answerable: faithful | 0.53 | 0.45 | 0.53 | 0.56 |
-| Unanswerable: correct (n=5) | 0.60 | **0.80** | 0.40 | 0.60 |
-| Answers that mix text with the no-answer sentence | 0.20 | 0.52 | 0.16 | 0.12 |
-| Seconds per answer (2 CPU cores) | 98 | 134 | 114 | 114, blocked ones ~8 |
+| Unanswerable: correct (n = 5) | 0.60 | **0.80** | 0.40 | 0.60 |
+| Answers mixing text and the no-answer sentence | 0.20 | 0.52 | 0.16 | 0.12 |
+| Seconds per answer (2 CPU cores) | 98 | 134 | 114 | 114 |
 
-Notes on the table:
-- Faithfulness is rated only for answers with content (n = 19, 20, 19, 18).
-- The gate column is simulated from the rated reranker answers ([eval/results/gate_rerank.csv](eval/results/gate_rerank.csv)):
-  - above the threshold, the model sees the same sources, so its rated answer stays valid
-  - below the threshold, the system returns the no-answer sentence
+*Table 3: Answer quality of `qwen3:1.7b`. Faithfulness is rated only for answers with content (n = 19, 20, 19, 18). The last column is simulated from the rated reranker answers (Section 5.3).*
 
-### What I learned from the numbers
+My first attempt to reduce invented answers changed the prompt. The stricter prompt told the
+model to reply only with the no-answer sentence when unsure, also for similar topics, other
+persons or other periods, and it gave a negative example. As Table 3 shows, the model then
+refused more unanswerable questions (0.60 to 0.80). But it also refused or misread answerable
+ones, so correctness on those fell from 0.55 to 0.45. In half of all answers, the model wrote an
+explanation followed by the no-answer sentence. It never returned the bare sentence the prompt
+asked for. I therefore reverted the prompt.
 
-1. **Better retrieval helped most.** The reranker raised answer correctness from 0.55 to 0.80.
-   Changing the prompt did not help:
-   - The stricter prompt told the model to give only the no-answer sentence when unsure. It made the model refuse more unanswerable questions.
-   - It also cost two correct answers to answerable ones.
-   - The small model never returned the bare sentence. I measured this variant and rejected it.
-2. **Faithfulness is a model problem.** Even with the right source, `qwen3:1.7b` often adds a wrong year, cites the wrong source number or invents a detail. The core fact is usually right.
-3. **Better retrieval can make abstention worse.** The reranker also finds the closest near-misses for unanswerable questions. Example: a passage saying that the *next* World Cup takes place in Qatar. The small model then built an answer from it ("Qatar won the 2014 World Cup").
-4. **The relevance gate is a cheap fix, but it has limits.**
-   - A threshold of 0.0 on the best reranker score blocks two unanswerable questions and one answerable question whose answer was wrong anyway.
-   - It blocks no correct answer, and it saves the 100 s model call.
-   - The hard negatives score as high as real answers (0.9 to 2.1 against 1.6 for an answerable question), so no threshold separates them.
-   - The threshold was chosen on the same 25 questions it is evaluated on, so the result is optimistic.
-5. **Automatic checks flag, they do not fix.**
-   - The number check flags 11 of the 29 unfaithful answers across all runs, and only 1 of the 29 faithful ones.
-   - It cannot see claims in words, or correct numbers used in the wrong context.
-   - The uncited-sentence warning is a weaker signal: the model often writes summary sentences without a citation.
+The reranker had the largest effect of all changes. With the correct passage among the
+sources in 90 % instead of 75 % of the cases, correctness on answerable questions rose from
+0.55 to 0.80. Faithfulness, however, did not change. Even with the right source, the model often
+adds a detail that no source supports:
+- a wrong year ("summer 2023" instead of 2022)
+- a figure attributed to the wrong source number
+- a period that the speech does not mention
 
-![Relevance gate: no passage is relevant enough, so the model is not asked](docs/gate.png)
+These are errors of the language model, not of retrieval, and a larger model is the most
+direct remedy.
 
-## Running it
+The reranker also had an unwanted side effect on the unanswerable questions, whose correctness
+fell from 0.60 to 0.40. For such questions, the reranker finds the closest near-misses. For
+"Who won the 2014 World Cup?" its best passage mentioned that the *next* World Cup would take
+place in Qatar. The small model built its answer from this passage: "Qatar won the 2014 World
+Cup".
 
-The pipeline has three stages, each on suitable hardware:
+### 5.3 Relevance gate
 
-| Stage | Where I ran it | Why |
-|---|---|---|
-| ETL and chunking | laptop | pandas on about 60 MB of text |
-| Embeddings | Google Colab (T4 GPU) | 46k chunks take 7 minutes on a GPU |
-| Qdrant, Ollama, app, evaluation | GitHub Codespaces (2 cores, 8 GB RAM, 32 GB disk) | Docker is preinstalled |
+| Threshold | Answerable blocked | Unanswerable blocked | Answerable correct | Unanswerable correct |
+|---|---|---|---|---|
+| off | 0 | 0 | 0.80 | 0.40 |
+| **0.0** | **1** | **2** | **0.80** | **0.60** |
+| 0.6 | 2 | 2 | 0.75 | 0.60 |
+| 1.25 | 2 | 3 | 0.75 | 0.80 |
+| 2.24 | 4 | 5 | 0.65 | 1.00 |
 
-### 1. Data and chunks
+*Table 4: Simulated effect of the relevance gate for selected thresholds on the best cross-encoder score.*
 
-```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-python -m parlamint_rag.etl       # downloads ~330 MB, writes data/processed/speeches.parquet
-python -m parlamint_rag.chunks    # writes data/processed/chunks.parquet
-```
+The relevance gate addresses the side effect described in Section 5.2. Its effect can be
+simulated without generating new answers. If a question scores above the threshold, the model
+sees the same sources as in the rated run, so the rated answer stays valid. If it scores below,
+the system returns the no-answer sentence.
 
-Run these from the repository root with `src` on the Python path (`pip install -e . --no-deps`
-or `export PYTHONPATH=src`).
+At a threshold of 0.0, the gate blocks two unanswerable questions, including the World Cup
+question (best score −0.74). It also blocks one answerable question: the one whose correct
+speech the retriever never found. There, the model had attributed other speakers' statements
+to the named politician, so declining to answer is the better outcome. No correct answer is
+lost, and every blocked question saves the 100 seconds of generation.
 
-### 2. Embeddings
+Table 4 also shows the limit of this approach. The hard unanswerable questions reach scores of
+0.9 to 2.1, while two correctly answered questions score only about 1.6. Any threshold that
+blocks the hard cases also blocks correct answers. In addition, the threshold was chosen on the
+same 25 questions it is evaluated on, and the margin is small: the next correctly answered
+question scores 0.25. The result is therefore optimistic.
 
-Open [notebooks/colab_runner.ipynb](notebooks/colab_runner.ipynb) in Colab with a GPU runtime.
-It clones the repository, runs the ETL, chunking and `embed.py`, and copies
-`embeddings.parquet` to Google Drive. Put the file into `data/processed/`.
+![The relevance gate blocks a question that the speeches cannot answer](docs/gate.png)
 
-### 3. Start the stack
+*Figure 3: The gate in the app. No passage is relevant enough, so the language model is not asked.*
 
-```bash
-docker compose up -d --build
-docker compose exec ollama ollama pull qwen3:1.7b               # once, ~1.4 GB
-docker compose run --rm app python -m parlamint_rag.index       # once, loads 46k vectors
-```
+### 5.4 Automatic checks
 
-Open http://localhost:8501 (in Codespaces: the forwarded port 8501). The first question
-takes longer, because the embedding model and the reranker are downloaded once into a volume.
+To see how useful the warnings are, I compared them with the manual ratings of all three runs.
+The number check flags 11 of the 29 answers rated unfaithful and only 1 of the 29 rated
+faithful. When it warns, the warning is usually justified, but it finds only about a third of
+the problems. It cannot see claims made in words ("three times as often"), and it accepts a
+correct number that is used in the wrong context. The warning about sentences without a citation
+is a weak signal. In the reranker run, it flags 4 of the 9 unfaithful answers, but also 5 of the
+10 faithful ones, because the model often closes with an uncited summary sentence. In the app,
+both warnings are therefore worded as "please check", not as errors.
 
-These settings are environment variables:
+## 6 Discussion and Limitations
 
-| Variable | Default | Meaning |
-|---|---|---|
-| `LLM_MODEL` | `qwen3:1.7b` | Ollama model |
-| `RERANK_MODEL` | `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` | empty = vector search only |
-| `RELEVANCE_THRESHOLD` | `0.0` | empty = no relevance gate |
+The results support a common observation about RAG: the quality of the answers depends more on
+retrieval than on the prompt. A cross-encoder raised answer correctness by 25 percentage
+points, while the prompt change made the system worse. A deterministic gate partly repaired the
+side effect of better retrieval. The remaining problem lies in the generator. A model with 1.7
+billion parameters reproduces the core fact of a passage reliably, but not its details.
 
-### 4. Evaluate
+The project has clear limits:
+- **Small evaluation set.** 25 questions with one rater give tendencies, not significant differences.
+- **Ambiguous reference.** One fact question turned out to be ambiguous: two speeches give different amounts (60 and 68 million euro), and both are counted as correct.
+- **Speaker names are not searchable.** Questions about what a named person said work only by chance.
+- **Salutations.** Most first chunks of a speech begin with formal salutations ("Sehr geehrter Herr Präsident!"). I measured them at about 4 % of a chunk's text and did not remove them.
+- **Speed.** On two CPU cores, an answer takes about two minutes. The Ollama runner also crashed about three times per 25 answers, which the evaluation script handles by retrying and resuming.
+- **Colab.** The embeddings were computed on Google infrastructure. This is acceptable for public parliamentary data in a prototype, but in production this step would also run on own hardware.
 
-```bash
-# retrieval only (minutes) or retrieval + answers (about 50 minutes on 2 CPU cores)
-docker compose run --rm -v "$PWD/eval:/app/eval" app python -m parlamint_rag.evaluate --retrieval-only --tag rerank
-docker compose run --rm -v "$PWD/eval:/app/eval" app python -m parlamint_rag.evaluate --tag rerank
-# after rating the answers by hand (columns faithful, correct)
-python -m parlamint_rag.evaluate --summarize eval/results/answers_qwen3-1.7b_rerank.csv
-# best reranker score per question and the simulated relevance gate
-docker compose run --rm -v "$PWD/eval:/app/eval" app python -m parlamint_rag.evaluate --gate eval/results/answers_qwen3-1.7b_rerank.csv --tag rerank
-```
+Regarding data protection and regulation: the speeches are public, and they name members of
+parliament, which is the purpose of the corpus. Questions typed into the app are not stored.
+The system answers information questions and makes no decisions about people. Under the EU AI
+Act, it would therefore most likely fall under the transparency obligations rather than the
+high-risk category. The app meets these obligations by labelling the answers as AI-generated
+and showing their sources.
 
-### Practical notes
+## 7 Conclusion and Next Steps
 
-- **Disk**: the Ollama image alone takes 8.5 GB on disk (it ships GPU libraries), and the app image plus its build cache need several GB more. On a 32 GB Codespace, run `docker builder prune -af` after a build.
-  - Because of this, Compose mounts `src/` and `app/` into the app container, so code changes need a restart (`docker compose up -d`), not a rebuild.
-- **Ollama crashes**: on two cores the Ollama runner crashed about 3 times in 25 answers. `evaluate.py` saves after every answer, retries, and can `--resume`.
+The project shows the full path of a RAG system: from raw parliamentary data through cleaning,
+chunking, embedding and two-stage retrieval to a cited answer, packaged in containers that run
+without an external service. More importantly, it shows how such a system can be evaluated
+honestly. Every change was measured on a fixed question set, and a change that did not help
+was reverted.
 
-## Project layout
+With more resources, I would take these steps, in order of expected effect:
+1. A larger evaluation set with a second rater, so that an LLM-as-judge can be validated against human ratings and then run as a regression test.
+2. A larger language model on own GPU hardware, the most direct lever for faithfulness.
+3. Hybrid search, which combines BM25 with dense vectors and helps with exact terms, numbers and names.
+4. Speaker metadata in the chunk text or in an automatically extracted filter, so that questions about named persons work.
+5. Claim verification with an NLI model, to catch wrong details beyond numbers.
 
-```
-src/parlamint_rag/
-  config.py     paths, model names, thresholds (environment variables for Docker)
-  etl.py        download, extract, clean, validate, store (Parquet + DuckDB)
-  chunks.py     overlapping word windows with speech metadata
-  embed.py      E5 embeddings with "query: " / "passage: " prefixes
-  index.py      Qdrant collection, payload indexes, filtered search, sanity checks
-  rerank.py     cross-encoder second stage
-  rag.py        retrieve -> relevance gate -> prompt -> cited answer
-  verify.py     citation and number checks
-  evaluate.py   Recall@k, MRR, answer metrics, relevance gate simulation
-app/streamlit_app.py
-eval/questions.jsonl, eval/results/    evaluation set and all result files
-notebooks/colab_runner.ipynb           thin GPU runner, no logic in the notebook
-Dockerfile, docker-compose.yml
-```
+## References
 
-## Design decisions
+Bonifacio, L., Jeronymo, V., Abonizio, H. Q., Campiotti, I., Fadaee, M., Lotufo, R., & Nogueira, R. (2021). mMARCO: A multilingual version of the MS MARCO passage ranking dataset. *arXiv:2108.13897*.
 
-- **Chunks of 250 words with 50 words of overlap.**
-  - About 70 % of the speeches are longer than the 512-token limit of the embedding model, so embedding whole speeches would cut them off.
-  - With 250 words, a median chunk has 369 tokens, and only 0.02 % of chunks are truncated.
-  - The overlap keeps facts at the window borders.
-- **E5 prefixes.** `multilingual-e5-small` was trained with `query: ` and `passage: ` prefixes. Without them, retrieval quality drops. The vectors are normalised, so cosine similarity equals the dot product.
-- **Retrieve and rerank.**
-  - A bi-encoder embeds question and passage separately: fast, works on the whole corpus.
-  - A cross-encoder reads both together: more accurate, but too slow for 46k chunks.
-  - So the bi-encoder proposes 30 candidates and the cross-encoder picks the best 5.
-- **Prompt design.**
-  - The sources are numbered, and the rules are repeated after the sources ("sandwich" prompt), because a small model forgets system rules after about 2,000 tokens of context.
-  - A rule tells the model to treat the sources as data, not instructions, as a basic defence against prompt injection.
-  - `think=False` and a temperature of 0.1 keep the answers short and stable.
-- **Small local model on purpose.** `qwen3:1.7b` runs on two CPU cores. It makes the failure modes of RAG easy to see, and the whole stack stays on own infrastructure.
+Erjavec, T., et al. (2024). *Multilingual comparable corpora of parliamentary debates ParlaMint 4.1*. Slovenian language resource repository CLARIN.SI. http://hdl.handle.net/11356/1912 (CC BY 4.0).
 
-## Limitations
+Lewis, P., Perez, E., Piktus, A., Petroni, F., Karpukhin, V., Goyal, N., Küttler, H., Lewis, M., Yih, W., Rocktäschel, T., Riedel, S., & Kiela, D. (2020). Retrieval-augmented generation for knowledge-intensive NLP tasks. *Advances in Neural Information Processing Systems 33*.
 
-- **Small evaluation set.** 25 questions and one rater: differences of one or two questions are not significant. The numbers show tendencies.
-- **Ambiguous reference.** One fact question turned out to be ambiguous: two speeches give different figures (60 vs 68 million euro). Both count as correct.
-- **Speaker names are not searchable.** Speaker names are metadata, not part of the chunk text, so "What did X say about Y" retrieves passages about Y by anyone.
-- **Salutations add noise.** Most first chunks start with a salutation ("Sehr geehrter Herr Präsident!"). I measured it at about 4 % of a chunk and did not strip it.
-- **Wrong details.** The 1.7B model often gets the main fact right and a detail wrong. The app warns, but cannot correct.
-- **Speed.** One answer takes about two minutes on a CPU. This is a prototype, not a service.
-- **Colab is Google infrastructure.** Using it for embeddings is fine for public parliamentary data in a prototype. In production, the embedding step would also run on own hardware.
+Qwen Team (2025). Qwen3 technical report. *arXiv:2505.09388*.
 
-## Next steps
-
-These are the next steps I would take in a larger setting, roughly in order of expected effect:
-
-1. **Larger evaluation set** (100+ questions, two raters). Then an LLM-as-judge that is validated against the human ratings, and run as a regression test in CI.
-2. **Larger language model** on own GPU hardware (for example `qwen3:4b` or `8b`). This is the most direct lever for faithfulness.
-3. **Hybrid search**: BM25 or sparse vectors combined with dense vectors (reciprocal rank fusion). This helps with exact terms, numbers and names.
-4. **Metadata in the chunk text or a self-query filter**, so questions about named speakers work.
-5. **Claim verification** with an NLI model, or a "quote first, then answer" prompt, to catch wrong details beyond numbers.
-6. **A larger embedding model** (`multilingual-e5-large`, `bge-m3`), and parent-document retrieval for more context.
-7. **Operations**: monitoring, user feedback buttons, versioned prompts and indexes.
-
-## Data protection, sovereignty and the EU AI Act
-
-- **No external API.** Questions, sources and answers stay on the machine:
-  - Qdrant and Ollama run in local containers.
-  - Their ports are bound to `127.0.0.1`.
-  - Telemetry is switched off for Qdrant, Streamlit and the Hugging Face client.
-- **Pinned versions.** Container images and Python packages are pinned, so the system can be rebuilt as it was evaluated.
-- **Personal data.** The speeches are public and contain the names of members of parliament. That is the purpose of the corpus. Questions typed into the app are not stored.
-- **EU AI Act.**
-  - The app tells users that the answer is AI-generated and may be wrong.
-  - It shows the sources next to every answer and marks unverified claims, so a human can check them.
-  - A system like this answers information questions and makes no decisions about people, so it would most likely fall under the transparency obligations, not the high-risk category.
-
-## Lessons learned from the earlier assignment
-
-Reviewing my own assignment code before reusing the corpus taught me more than the assignment itself:
-
-- **Import data defensively.**
-  - Read the TSV files with `quoting=csv.QUOTE_NONE` (quotes are part of speeches).
-  - The metadata rows end with a tab, so pandas needs `index_col=False`.
-  - Assert unique ids after a merge (`validate="one_to_one"`).
-  - Print the row count after every cleaning step. In the assignment, a party filter right before `drop_duplicates` made 862 removed rows look like duplicates; they were actually ministers without a party.
-- **Keep the case of German text.** Lowercasing destroys information in German (nouns, names). The ETL keeps the original text.
-- **Check the evaluation code, not only the model.**
-  - A reused variable meant that the "historical" test set was really part of the training data (leakage).
-  - Prefix matching of labels ("Centre" vs "Centre-left") made every prediction the same class.
-  - The baseline was an untrained classification head. A fair baseline is the majority class.
-
-  None of these show up as errors, only as suspicious numbers. This is why this project measures every change against a fixed evaluation set.
-
-## Data and licence
-
-Data: ParlaMint-AT, part of *Erjavec, Tomaž et al. (2024). Multilingual comparable corpora of
-parliamentary debates ParlaMint 4.1.* CLARIN.SI, http://hdl.handle.net/11356/1912, licensed
-under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The data is downloaded by
-`etl.py` and is not part of this repository.
-
-Models:
-- [intfloat/multilingual-e5-small](https://huggingface.co/intfloat/multilingual-e5-small)
-- [cross-encoder/mmarco-mMiniLMv2-L12-H384-v1](https://huggingface.co/cross-encoder/mmarco-mMiniLMv2-L12-H384-v1)
-- [Qwen3 1.7B](https://ollama.com/library/qwen3) via Ollama
+Wang, L., Yang, N., Huang, X., Yang, L., Majumder, R., & Wei, F. (2024). Multilingual E5 text embeddings: A technical report. *arXiv:2402.05672*.
