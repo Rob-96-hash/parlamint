@@ -7,25 +7,31 @@ Robert Seidel · November 2026 · Setup and usage: [SETUP.md](SETUP.md)
 
 ## 1 Introduction
 
-Retrieval-augmented generation (RAG) is the standard way to let a language model answer
-questions from a document collection it was not trained on (Lewis et al., 2020). A retriever
-first finds passages that are relevant to the question. A language model then writes an answer
-based only on these passages. Public administrations are interested in this approach because
-it promises answers that can be traced back to sources. In practice, every stage can fail. The
+Retrieval-augmented generation (RAG) is nowadays a standard way to let a language model answer
+questions from a document collection it was not trained on (Lewis et al., 2020). This makes it
+an asset for companies and public administrations with large amounts of internal information:
+employees can find what they need by asking a question instead of searching through documents.
+If the system runs on the organisation's own infrastructure, the documents never leave it. The
+system itself works as follows. A retriever first finds passages that are relevant to the
+question. A language model then writes an answer based only on these passages. In practice,
+however, every stage can fail, and this project revealed several of these pitfalls. The
 retriever can miss the relevant passage, the model can ignore it, or the model can add details
-that no source supports.
+that no source supports, so-called hallucinations. The main idea of this project is therefore
+to learn from these pitfalls, to see how individual design decisions affect the result, and to
+build a basic local implementation.
 
 This project complements a university deep learning assignment. In that assignment, I
 fine-tuned a Qwen model with LoRA to predict a speaker's party from speeches in the Austrian
 National Council (Nationalrat). Here I use the same corpus for a different task. My aim was to
 build a RAG system end to end, from the raw data to a containerised application, and to
 measure where it fails. Two constraints shaped the design. First, everything runs locally,
-with no external API, because sovereignty over data and models matters for public-sector use.
-Second, the language model is deliberately small (`qwen3:1.7b`), so that it runs on two CPU
-cores. This makes the typical failure modes of RAG easy to observe.
+with no external API, because sovereignty over data and models matters, especially in the
+public sector. Second, the language model is deliberately small (`qwen3:1.7b`), so that it runs
+on two CPU cores. This makes the typical failure modes of RAG easy to observe, and it explains
+part of the weaknesses that the evaluation reveals.
 
-The system answers German questions about speeches from 2018 to 2022. On a hand-checked
-evaluation set, it gives a correct answer to 80 % of the answerable questions. The largest
+The system answers German questions about speeches from 2018 to 2022. On a small hand-checked
+evaluation set of 25 questions, it gives a correct answer to 80 % of the answerable questions. The largest
 gain came from a second retrieval stage, not from prompt engineering. The main remaining
 weakness is faithfulness: the small model often gets the main fact right but adds a wrong
 detail.
