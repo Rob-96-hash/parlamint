@@ -35,9 +35,10 @@ detail.
 
 <p align="center">
   <img src="docs/app.png" width="380" alt="The app: a cited answer with a warning about sentences that have no source">
+  <br>
+  <em>Figure 1: The app answers a question with numbered citations. It warns about sentences
+  that cite no source and shows the speech passages it used.</em>
 </p>
-
-*Figure 1: The app answers a question with numbered citations. It warns about sentences that cite no source and shows the speech passages it used.*
 
 ## 2 Data
 
