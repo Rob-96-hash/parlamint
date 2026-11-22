@@ -116,8 +116,8 @@ def answer_row(q: dict, result: dict) -> dict:
         "sources": " | ".join(f"[{s['n']}] {s['speaker']}, {s['date']}, {s['speech_id']}" for s in sources),
         "seconds": result.get("stats", {}).get("seconds"),
         # filled in by hand: 1 = yes, 0 = no
-        "faithful": "",   # every statement is supported by the cited source
-        "correct": "",    # the answer matches the reference answer
+        "faithful": "",   # every factual claim (number, date, person, event) is in the sources
+        "correct": "",    # states the reference fact (unanswerable: does not invent an answer)
         "notes": "",
     }
 
@@ -159,8 +159,10 @@ def answer_summary(df: pd.DataFrame) -> pd.Series:
         "unanswerable: clean abstention (only that sentence)": unanswerable["clean"].mean(),
         "mean seconds per answer": pd.to_numeric(df["seconds"]).mean(),
     }
-    # Manual ratings, only where filled in
-    groups = {"answered answerable": answerable[~answerable["abstained"]], "unanswerable": unanswerable}
+    # Manual ratings, only where filled in. faithful: answers with content (a bare
+    # no-answer sentence has nothing to check); correct: all questions (abstaining on an
+    # answerable question counts as not correct).
+    groups = {"answerable": answerable, "unanswerable": unanswerable}
     for name, group in groups.items():
         for col in ("faithful", "correct"):
             values = pd.to_numeric(group[col], errors="coerce").dropna()
