@@ -54,6 +54,7 @@ def to_payloads(df: pd.DataFrame) -> list[dict]:
 
 
 def upload(client: QdrantClient, df: pd.DataFrame, vectors: np.ndarray, batch_size: int = 256) -> None:
+    """Upload all chunks as Qdrant points (vector + metadata payload) in batches."""
     points = (
         models.PointStruct(id=point_id(p["chunk_id"]), vector=v.tolist(), payload=p)
         for p, v in zip(to_payloads(df), vectors)
@@ -62,6 +63,7 @@ def upload(client: QdrantClient, df: pd.DataFrame, vectors: np.ndarray, batch_si
 
 
 def build_filter(party: str | None = None, year: int | None = None) -> models.Filter | None:
+    """Qdrant filter for party and/or year; None if neither is given."""
     must = []
     if party:
         must.append(models.FieldCondition(key="party", match=models.MatchValue(value=party)))
@@ -72,6 +74,7 @@ def build_filter(party: str | None = None, year: int | None = None) -> models.Fi
 
 def search(client: QdrantClient, query_vector: np.ndarray, k: int = 5,
            party: str | None = None, year: int | None = None) -> list[models.ScoredPoint]:
+    """The k chunks most similar to the query vector (cosine), optionally filtered."""
     return client.query_points(
         config.COLLECTION,
         query=query_vector,
@@ -81,6 +84,7 @@ def search(client: QdrantClient, query_vector: np.ndarray, k: int = 5,
 
 
 def sanity_check(client: QdrantClient, df: pd.DataFrame, vectors: np.ndarray) -> None:
+    """Check point count, self-retrieval (score ~1.0) and that filters return only matching chunks."""
     n_points = client.count(config.COLLECTION, exact=True).count
     assert n_points == len(df), f"{n_points} points in Qdrant, but {len(df)} chunks"
 
@@ -100,6 +104,7 @@ def sanity_check(client: QdrantClient, df: pd.DataFrame, vectors: np.ndarray) ->
 
 
 def main() -> None:
+    """Create the collection, upload all embeddings and run the sanity checks."""
     df, vectors = load_embeddings()
     client = QdrantClient(url=config.QDRANT_URL, timeout=60)
     print(f"[index] {len(df)} chunks -> {config.QDRANT_URL}, collection '{config.COLLECTION}'")

@@ -13,6 +13,7 @@ from qdrant_client import QdrantClient
 from parlamint_rag import config
 from parlamint_rag.embed import embed_query, load_model
 from parlamint_rag.index import search
+from parlamint_rag.rerank import load_reranker, rerank
 
 NO_ANSWER = config.NO_ANSWER
 
@@ -57,17 +58,31 @@ def cited_numbers(answer: str) -> list[int]:
 
 
 class RAG:
+    """Retrieval-augmented generation: find relevant chunks, let the LLM answer from them."""
+
     def __init__(self) -> None:
+        """Load the models and connect to Qdrant and Ollama."""
         self.embedder = load_model(device="cpu")
+        # Optional second stage; None if RERANK_MODEL is empty
+        self.reranker = load_reranker() if config.RERANK_MODEL else None
         self.qdrant = QdrantClient(url=config.QDRANT_URL)
         self.llm = ollama.Client(host=config.OLLAMA_URL)
 
     def retrieve(self, question: str, k: int = config.TOP_K,
                  party: str | None = None, year: int | None = None) -> list:
-        return search(self.qdrant, embed_query(self.embedder, question), k=k, party=party, year=year)
+        """The k most relevant chunks: vector search, then (if enabled) cross-encoder reranking."""
+        query_vector = embed_query(self.embedder, question)
+        if self.reranker is None:
+            return search(self.qdrant, query_vector, k=k, party=party, year=year)
+        # Stage 1: fast vector search over all chunks, more candidates than needed
+        candidates = search(self.qdrant, query_vector, k=max(k, config.RERANK_CANDIDATES),
+                            party=party, year=year)
+        # Stage 2: the slower, more accurate cross-encoder re-sorts only these candidates
+        return rerank(self.reranker, question, candidates, k)
 
     def answer(self, question: str, k: int = config.TOP_K,
                party: str | None = None, year: int | None = None) -> dict:
+        """Retrieve k chunks and generate a cited German answer; also returns sources and stats."""
         hits = self.retrieve(question, k=k, party=party, year=year)
         if not hits:
             return {"question": question, "answer": NO_ANSWER, "sources": [], "cited": []}
@@ -97,6 +112,7 @@ class RAG:
 
 
 def main() -> None:
+    """Command line: answer one question and print the answer, sources and warnings."""
     parser = argparse.ArgumentParser(description="Ask a question about Austrian parliamentary speeches.")
     parser.add_argument("question")
     parser.add_argument("--party", help='e.g. "Grüne", "ÖVP", "SPÖ", "FPÖ", "NEOS", "JETZT"')
@@ -118,7 +134,8 @@ def main() -> None:
         print("WARNING: answer has no citations")
     stats = result.get("stats")
     if stats:
-        print(f"(model: {config.LLM_MODEL}, {stats['prompt_tokens']} prompt tokens, "
+        print(f"(model: {config.LLM_MODEL}, reranker: {config.RERANK_MODEL or 'off'}, "
+              f"{stats['prompt_tokens']} prompt tokens, "
               f"{stats['answer_tokens']} answer tokens, {stats['seconds']} s)")
 
 

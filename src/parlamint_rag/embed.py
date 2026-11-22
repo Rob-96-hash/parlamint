@@ -21,6 +21,7 @@ def load_model(device: str | None = None) -> SentenceTransformer:
 
 
 def embed_passages(model: SentenceTransformer, texts: list[str], batch_size: int = 128) -> np.ndarray:
+    """Embed chunk texts (with the E5 "passage: " prefix) as normalised float32 vectors."""
     # normalize_embeddings=True: every vector has length 1, so cosine similarity == dot product
     return model.encode(
         [PASSAGE_PREFIX + t for t in texts],
@@ -31,6 +32,7 @@ def embed_passages(model: SentenceTransformer, texts: list[str], batch_size: int
 
 
 def embed_query(model: SentenceTransformer, question: str) -> np.ndarray:
+    """Embed one question (with the E5 "query: " prefix) as a normalised float32 vector."""
     return model.encode(QUERY_PREFIX + question, normalize_embeddings=True).astype(np.float32)
 
 
@@ -46,6 +48,7 @@ def truncation_report(model: SentenceTransformer, texts: list[str]) -> None:
 
 
 def main() -> None:
+    """Embed all chunks and save them with their vectors to embeddings.parquet."""
     chunks = pd.read_parquet(config.CHUNKS_PARQUET)
     model = load_model()
     print(f"[embed] {config.EMBED_MODEL} on {model.device}, {len(chunks)} chunks")

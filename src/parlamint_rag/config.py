@@ -40,6 +40,11 @@ COLLECTION = "parlamint_chunks"
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 LLM_MODEL = os.environ.get("LLM_MODEL", "qwen3:1.7b")
 TOP_K = 5
+
+# Reranking: a cross-encoder re-sorts the top RERANK_CANDIDATES vector search hits
+# (see rerank.py). RERANK_MODEL="" switches it off, e.g. for before/after comparisons.
+RERANK_MODEL = os.environ.get("RERANK_MODEL", "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1")
+RERANK_CANDIDATES = 30
 # Fixed sentence for "the sources do not answer this"; also used to measure abstention
 NO_ANSWER = "Dazu finde ich in den Quellen keine Antwort."
 

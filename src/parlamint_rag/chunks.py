@@ -69,6 +69,7 @@ def validate(chunks: pd.DataFrame, speeches: pd.DataFrame) -> None:
 
 
 def main() -> None:
+    """Split all speeches into chunks, validate them and save chunks.parquet."""
     speeches = pd.read_parquet(config.SPEECHES_PARQUET)
     chunks = make_chunks(speeches)
     validate(chunks, speeches)

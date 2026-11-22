@@ -93,6 +93,7 @@ def transform(meta: pd.DataFrame, texts: pd.DataFrame) -> pd.DataFrame:
     """Merge and clean. Returns one row per speech with the columns in COLUMNS."""
 
     def log(step: str, df: pd.DataFrame) -> None:
+        """Print the number of rows left after a cleaning step."""
         print(f"[transform] {step:<30} {len(df):>6} rows")
 
     # validate="one_to_one" raises an error if an ID appears twice on either side
@@ -157,6 +158,7 @@ def load(df: pd.DataFrame) -> None:
 
 
 def main() -> None:
+    """Run the whole ETL: download, extract, read, clean, validate, save."""
     download()
     extract()
     meta, texts = read_raw()

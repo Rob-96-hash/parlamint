@@ -4,9 +4,11 @@ Run with:
     python -m parlamint_rag.evaluate --retrieval-only     # fast: Qdrant + query embeddings only
     python -m parlamint_rag.evaluate                      # also generates all answers (slow on CPU)
     python -m parlamint_rag.evaluate --resume             # continue an interrupted run
-    python -m parlamint_rag.evaluate --tag fix            # write answers_<model>_fix.csv instead
+    python -m parlamint_rag.evaluate --tag fix            # suffix for all result files, e.g.
+                                                          # retrieval_fix.csv, answers_<model>_fix.csv
     python -m parlamint_rag.evaluate --summarize eval/results/answers_qwen3-1.7b.csv
                                                           # after rating the answers by hand
+    RERANK_MODEL="" python -m parlamint_rag.evaluate ...  # vector search only, without reranker
 
 Retrieval metrics (answerable questions only, relevance on speech level):
     Recall@k  share of questions with at least one gold speech among the top k chunks
@@ -36,6 +38,7 @@ CSV_OPTIONS = {"sep": ";", "encoding": "utf-8-sig", "index": False}
 
 
 def load_questions(path: Path = config.QUESTIONS_PATH) -> list[dict]:
+    """Read the evaluation questions (one JSON object per line)."""
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
@@ -50,15 +53,19 @@ def first_relevant_rank(retrieved_speech_ids: list[str], gold: set[str]) -> int 
 # --- Retrieval --------------------------------------------------------------
 
 def evaluate_retrieval(rag, questions: list[dict]) -> pd.DataFrame:
+    """Rank of the first gold speech in the top 10 for every answerable question, plus Recall@k and MRR."""
     rows = []
     for q in questions:
         if q["type"] == "unanswerable":
             continue
+        start = time.perf_counter()
         hits = rag.retrieve(q["question"], k=max(KS), party=q["party"], year=q["year"])
+        seconds = time.perf_counter() - start
         retrieved = [h.payload["speech_id"] for h in hits]
         rank = first_relevant_rank(retrieved, set(q["gold_speech_ids"]))
         rows.append({"id": q["id"], "type": q["type"], "question": q["question"],
-                     "rank": rank, "top1_speech_id": retrieved[0] if retrieved else None})
+                     "rank": rank, "top1_speech_id": retrieved[0] if retrieved else None,
+                     "seconds": round(seconds, 2)})
     df = pd.DataFrame(rows)
     for k in KS:
         df[f"Recall@{k}"] = df["rank"].le(k)          # missing rank -> False
@@ -67,6 +74,7 @@ def evaluate_retrieval(rag, questions: list[dict]) -> pd.DataFrame:
 
 
 def retrieval_summary(df: pd.DataFrame) -> pd.DataFrame:
+    """Mean Recall@k and MRR over all answerable questions and per question type."""
     metrics = [f"Recall@{k}" for k in KS] + ["MRR"]
     summary = pd.concat([df[metrics].mean().to_frame("all").T, df.groupby("type")[metrics].mean()])
     summary.insert(0, "n", [len(df)] + df.groupby("type").size().tolist())
@@ -99,6 +107,7 @@ def answer_with_retry(rag, q: dict, attempts: int = 3, wait: int = 15) -> dict:
 
 
 def answer_row(q: dict, result: dict) -> dict:
+    """One CSV row per question: answer, automatic checks and empty columns for manual rating."""
     sources, cited = result["sources"], result["cited"]
     gold = set(q["gold_speech_ids"])
     cited_speech_ids = {s["speech_id"] for s in sources if s["n"] in cited}
@@ -141,6 +150,7 @@ def evaluate_answers(rag, questions: list[dict], path: Path, resume: bool = Fals
 
 
 def answer_summary(df: pd.DataFrame) -> pd.Series:
+    """Automatic and (where filled in) manual answer metrics as one table."""
     df = df.copy()
     df["answer"] = df["answer"].fillna("").astype(str)
     # Recomputed from the answer text, so older CSVs are summarised with the same definitions
@@ -185,12 +195,13 @@ def read_answers_csv(path: Path) -> pd.DataFrame:
 # --- Main -------------------------------------------------------------------
 
 def main() -> None:
+    """Command line: run the retrieval evaluation, then (unless --retrieval-only) the answers."""
     parser = argparse.ArgumentParser(description="Evaluate retrieval and answers.")
     parser.add_argument("--retrieval-only", action="store_true", help="skip answer generation")
     parser.add_argument("--summarize", type=Path, help="summarise an existing (rated) answers CSV")
     parser.add_argument("--resume", action="store_true",
                         help="keep answers already in the answers CSV and only generate the missing ones")
-    parser.add_argument("--tag", help="suffix for the answers CSV, e.g. 'fix' -> answers_<model>_fix.csv")
+    parser.add_argument("--tag", help="suffix for all result files, e.g. 'rerank' -> retrieval_rerank.csv")
     args = parser.parse_args()
 
     if args.summarize:
@@ -200,14 +211,17 @@ def main() -> None:
     from parlamint_rag.rag import RAG  # imported here: loads torch, not needed for --summarize
 
     config.RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    # "_rerank" for --tag rerank, nothing without a tag
+    suffix = f"_{args.tag}" if args.tag else ""
     questions = load_questions()
     rag = RAG()
 
     retrieval = evaluate_retrieval(rag, questions)
-    retrieval.to_csv(config.RESULTS_DIR / "retrieval.csv", **CSV_OPTIONS)
+    retrieval.to_csv(config.RESULTS_DIR / f"retrieval{suffix}.csv", **CSV_OPTIONS)
     summary = retrieval_summary(retrieval)
-    summary.to_csv(config.RESULTS_DIR / "retrieval_summary.csv", sep=";", encoding="utf-8-sig")
-    print("\nRetrieval\n" + summary.to_string())
+    summary.to_csv(config.RESULTS_DIR / f"retrieval_summary{suffix}.csv", sep=";", encoding="utf-8-sig")
+    print(f"\nRetrieval (reranker: {config.RERANK_MODEL or 'off'})\n" + summary.to_string())
+    print(f"mean seconds per query: {retrieval['seconds'].mean():.2f}")
     missed = retrieval[retrieval["rank"].isna()]
     if len(missed):
         print("\nNot in the top 10:", ", ".join(missed["id"]))
@@ -216,7 +230,7 @@ def main() -> None:
         return
 
     model = config.LLM_MODEL.replace(":", "-")
-    path = config.RESULTS_DIR / f"answers_{model}{'_' + args.tag if args.tag else ''}.csv"
+    path = config.RESULTS_DIR / f"answers_{model}{suffix}.csv"
     answers = evaluate_answers(rag, questions, path, resume=args.resume)
     answers.to_csv(path, **CSV_OPTIONS)
     print(f"\nAnswers ({config.LLM_MODEL})\n" + answer_summary(answers).to_string())
