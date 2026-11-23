@@ -312,19 +312,25 @@ both warnings are therefore worded as "please check", not as errors.
 
 ## 6 Discussion and Limitations
 
-The results support a common observation about RAG: the quality of the answers depends more on
-retrieval than on the prompt. A cross-encoder raised answer correctness by 25 percentage
-points, while the prompt change made the system worse. A deterministic gate partly repaired the
-side effect of better retrieval. The remaining problem lies in the generator. A model with 1.7
-billion parameters reproduces the core fact of a passage reliably, but not its details.
+The results support a common observation about RAG, namely that the quality of the answers
+depends more on retrieval than on the prompt. A cross-encoder raised answer correctness by 25
+percentage points, while the prompt change made the system worse. The implementation of a
+deterministic gate partly repaired the side effect of better retrieval. The remaining problem
+seems to lie in the generator, where a model with 1.7 billion parameters reproduces the core
+fact of a passage reliably, but not its details.
 
-The project has clear limits:
-- **Small evaluation set.** 25 questions with one rater give tendencies, not significant differences.
-- **Ambiguous reference.** One fact question turned out to be ambiguous: two speeches give different amounts (60 and 68 million euro), and both are counted as correct.
-- **Speaker names are not searchable.** Questions about what a named person said work only by chance.
-- **Salutations.** Most first chunks of a speech begin with formal salutations ("Sehr geehrter Herr Präsident!"). I measured them at about 4 % of a chunk's text and did not remove them.
-- **Speed.** On two CPU cores, an answer takes about two minutes. The Ollama runner also crashed about three times per 25 answers, which the evaluation script handles by retrying and resuming.
-- **Colab.** The embeddings were computed on Google infrastructure. This is acceptable for public parliamentary data in a prototype, but in production this step would also run on own hardware.
+The project has clear limits. The evaluation set is small, with 25 questions and only one
+rater, so the results show tendencies rather than significant differences. Furthermore, one
+evaluation question turned out to be ambiguous: two speeches give different amounts (60 and 68
+million euro), and both are counted as correct. Speaker names are not searchable, so answers
+to questions about what a named person said can hardly be considered reliable. Most first
+chunks of a speech start with formal salutations ("Sehr geehrter Herr Präsident!"), but these
+make up only about 4 % of a chunk's text. Removing them would probably have improved retrieval
+only slightly, while it would have required computing all embeddings again. In production,
+the embeddings would ideally be computed on internal hardware instead of Google Colab to
+ensure maximum data security. Finally, with only two CPU cores, an answer takes about two
+minutes, and the Ollama runner crashed about three times per 25 answers, which the evaluation
+script handles by retrying and resuming.
 
 Regarding data protection and regulation: the speeches are public, and they name members of
 parliament, which is the purpose of the corpus. Questions typed into the app are not stored.
@@ -335,9 +341,9 @@ and showing their sources.
 
 ## 7 Conclusion and Next Steps
 
-The project shows the full path of a RAG system: from raw parliamentary data through cleaning,
-chunking, embedding and two-stage retrieval to a cited answer, packaged in containers that run
-without an external service. More importantly, it shows how such a system can be evaluated
+To conclude, the project shows the full path of a RAG system, starting from raw
+parliamentary data through cleaning, chunking, embedding and two-stage retrieval up to a
+cited answer, packaged in containers that run without an external service. More importantly, it shows how such a system can be evaluated
 honestly. Every change was measured on a fixed question set, and a change that did not help
 was reverted.
 
